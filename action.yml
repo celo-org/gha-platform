@@ -1,0 +1,66 @@
+name: 'Platform'
+description: 'Unified platform-related actions'
+inputs:
+  ACTION:
+    required: true
+    type: string
+  METADATA:
+    required: false
+    type: string
+  VARIABLES:
+    required: true
+    type: string
+
+outputs:
+  INFRASTRUCTURE_OUTPUT:
+    description: "Infrastructure Output JSON in base64"
+    value: ${{ steps.platform_action.outputs.INFRASTRUCTURE_OUTPUT }}
+
+runs:
+  using: "composite"
+
+  steps:
+    - run: echo "${{ github.action_path }}" >> $GITHUB_PATH
+      shell: bash
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-region: ${{env.AWS_REGION}}
+
+    - name: Login to Amazon ECR
+      uses: aws-actions/amazon-ecr-login@v1
+      with:
+        registries: ${{ env.BUILDER_AWS_ACCOUND_ID }}
+
+    - name: pulling platform-tool image
+      run: docker pull ${{ env.PLATFORM_TOOL_CONTAINER_URI }}
+      shell: bash
+
+    - id: preparing_env_file
+      name: Preparing envfile
+      env:
+        ACTION: ${{ inputs.ACTION }}
+        METADATA: ${{ inputs.METADATA }}
+        VARIABLES: ${{ inputs.VARIABLES }}
+      run: |
+        import os
+        import yaml
+        import base64
+        data = {}
+        data['ACTION'] = base64.b64encode(os.getenv("ACTION", '').encode('ascii'))
+        data['METADATA'] = base64.b64encode(os.getenv("METADATA", '').encode('ascii'))
+        data['VARIABLES'] = base64.b64encode(os.getenv("VARIABLES", '').encode('ascii'))
+        with open('env.yml', 'w') as outfile:
+          yaml.dump(data, outfile, default_flow_style=False)
+      shell: python3 {0}
+
+    - id: cat_yaml
+      run: cat env.yml
+      shell: bash
+
+    - id: platform_action
+      name: Executing Platform action
+      run: docker run -t --env SERVICE_NAME=${{ env.SERVICE_NAME }} --env AWS_REGION=${{ env.AWS_REGION }} -v $(pwd):/platform/github-workspace --rm ${{ env.PLATFORM_TOOL_CONTAINER_URI }}
+      shell: bash
+
